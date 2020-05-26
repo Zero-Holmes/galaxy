@@ -10,13 +10,17 @@ try:
 except ImportError:
     from galaxy.util.bunch import Bunch
     docker = Bunch(errors=Bunch(NotFound=None))
+from six.moves import shlex_quote
 
 from galaxy.containers import (
     Container,
     ContainerPort,
     ContainerVolume
 )
-from galaxy.util import pretty_print_time_interval
+from galaxy.util import (
+    pretty_print_time_interval,
+    unicodify,
+)
 
 
 CPUS_LABEL = '_galaxy_cpus'
@@ -44,7 +48,7 @@ class DockerAttributeContainer(object):
         return hash(tuple(sorted([repr(x) for x in self._members])))
 
     def __str__(self):
-        return ', '.join([str(x) for x in self._members]) or 'None'
+        return ', '.join(str(x) for x in self._members) or 'None'
 
     def __iter__(self):
         return iter(self._members)
@@ -101,7 +105,13 @@ class DockerVolume(ContainerVolume):
         return cls(**kwds)
 
     def __str__(self):
-        return ":".join(filter(lambda x: x is not None, (self.host_path, self.path, self.mode)))
+        volume_str = ":".join(filter(lambda x: x is not None, (self.host_path, self.path, self.mode)))
+        if "$" not in volume_str:
+            volume_for_cmd_line = shlex_quote(volume_str)
+        else:
+            # e.g. $_GALAXY_JOB_TMP_DIR:$_GALAXY_JOB_TMP_DIR:rw so don't single quote.
+            volume_for_cmd_line = '"%s"' % volume_str
+        return volume_for_cmd_line
 
     def to_native(self):
         host_path = self.host_path or self.path
@@ -133,9 +143,9 @@ class DockerContainer(Container):
         rval = []
         try:
             port_mappings = self.inspect['NetworkSettings']['Ports']
-        except KeyError as exc:
+        except KeyError:
             log.warning("Failed to get ports for container %s from `docker inspect` output at "
-                        "['NetworkSettings']['Ports']: %s: %s", self.id, exc.__class__.__name__, str(exc))
+                        "['NetworkSettings']['Ports']: %s: %s", self.id, exc_info=True)
             return None
         for port_name in port_mappings:
             for binding in port_mappings[port_name]:
@@ -217,9 +227,9 @@ class DockerService(Container):
         rval = []
         try:
             port_mappings = self.inspect['Endpoint']['Ports']
-        except (IndexError, KeyError) as exc:
+        except (IndexError, KeyError):
             log.warning("Failed to get ports for container %s from `docker service inspect` output at "
-                        "['Endpoint']['Ports']: %s: %s", self.id, exc.__class__.__name__, str(exc))
+                        "['Endpoint']['Ports']: %s: %s", self.id, exc_info=True)
             return None
         for binding in port_mappings:
             rval.append(ContainerPort(
@@ -283,7 +293,7 @@ class DockerService(Container):
                     except ValueError:
                         self._env[env_str] = None
             except KeyError as exc:
-                log.debug('Cannot retrieve container environment: KeyError: %s', str(exc))
+                log.debug('Cannot retrieve container environment: KeyError: %s', unicodify(exc))
         return self._env
 
     @property

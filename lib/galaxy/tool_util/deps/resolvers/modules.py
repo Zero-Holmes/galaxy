@@ -41,7 +41,7 @@ UNKNOWN_FIND_BY_MESSAGE = "ModuleDependencyResolver does not know how to find mo
 
 
 class ModuleDependencyResolver(DependencyResolver, MappableDependencyResolver):
-    dict_collection_visible_keys = DependencyResolver.dict_collection_visible_keys + ['base_path', 'modulepath']
+    dict_collection_visible_keys = DependencyResolver.dict_collection_visible_keys + ['base_path', 'modulepath', 'modulecmd', 'prefetch', 'default_indicator', 'find_by']
     resolver_type = "modules"
 
     def __init__(self, dependency_manager, **kwds):
@@ -50,6 +50,7 @@ class ModuleDependencyResolver(DependencyResolver, MappableDependencyResolver):
         self._setup_mapping(dependency_manager, **kwds)
         self.versionless = _string_as_bool(kwds.get('versionless', 'false'))
         find_by = kwds.get('find_by', 'avail')
+        self.find_by = find_by
         prefetch = _string_as_bool(kwds.get('prefetch', DEFAULT_MODULE_PREFETCH))
         self.modulecmd = kwds.get('modulecmd', DEFAULT_MODULECMD_PATH)
         self.modulepath = kwds.get('modulepath', self.__default_modulespath())
@@ -83,9 +84,9 @@ class ModuleDependencyResolver(DependencyResolver, MappableDependencyResolver):
             return NullDependency(version=version, name=name)
 
         if self.__has_module(name, version):
-            return ModuleDependency(self, name, version, exact=True)
+            return ModuleDependency(self, name, version, exact=True, dependency_resolver=self)
         elif self.versionless and self.__has_module(name, None):
-            return ModuleDependency(self, name, None, exact=False)
+            return ModuleDependency(self, name, None, exact=False, dependency_resolver=self)
 
         return NullDependency(version=version, name=name)
 
@@ -182,14 +183,15 @@ class ModuleDependency(Dependency):
     Using Environment Modules' 'modulecmd' (specifically 'modulecmd sh load') to
     convert module specifications into shell expressions for inclusion in
     the script used to run a tool in Galaxy."""
-    dict_collection_visible_keys = Dependency.dict_collection_visible_keys + ['module_name', 'module_version']
+    dict_collection_visible_keys = Dependency.dict_collection_visible_keys + ['module_name', 'module_version', 'dependency_resolver']
     dependency_type = 'module'
 
-    def __init__(self, module_dependency_resolver, module_name, module_version=None, exact=True):
+    def __init__(self, module_dependency_resolver, module_name, module_version=None, exact=True, dependency_resolver=None):
         self.module_dependency_resolver = module_dependency_resolver
         self.module_name = module_name
         self.module_version = module_version
         self._exact = exact
+        self.dependency_resolver = dependency_resolver
 
     @property
     def name(self):

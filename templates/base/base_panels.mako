@@ -23,6 +23,8 @@
     <!--- base/base_panels.mako stylesheets() -->
     ${h.css(
         'bootstrap-tour',
+    )}
+    ${h.dist_css(
         'base'
     )}
 </%def>
@@ -31,16 +33,11 @@
 ## TODO: remove when all libs are required directly in modules
 <%def name="javascripts()">
     <!--- base/base_panels.mako javascripts() -->
-    ${h.js(
-        'bundled/libs.chunk',
-        'bundled/base.chunk'
+    ${h.dist_js(
+        'libs.chunk',
+        'base.chunk',
+        'generic.bundled'
     )}
-    ${ javascript_entry() }
-</%def>
-
-<%def name="javascript_entry()">
-    <!-- base/base_panels.mako javascript_entry -->
-    ${ h.js('bundled/generic.bundled')}
 </%def>
 
 <%def name="javascript_app()">
@@ -70,7 +67,7 @@
     </script>
 
     %if t.webapp.name == 'galaxy' and app.config.ga_code:
-        ${galaxy_client.config_google_analytics(app)}
+        ${galaxy_client.config_google_analytics(app.config.ga_code)}
     %endif
 
 </%def>
@@ -166,7 +163,7 @@
                 </div>
             </noscript>
         %endif
-        <div id="everything" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">
+        <div id="everything">
             
             ## Background displays first
             <div id="background"></div>
@@ -195,7 +192,7 @@
                     <div id="left">
                         ${self.left_panel()}
                         <div class="unified-panel-footer">
-                            <div id="left-panel-collapse" class="panel-collapse"></div>
+                            <div id="left-panel-collapse" class="panel-collapse left"></div>
                             <div id="left-panel-drag" class="drag"></div>
                         </div>
                     </div><!--end left-->

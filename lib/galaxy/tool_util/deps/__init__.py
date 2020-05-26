@@ -10,7 +10,8 @@ from collections import OrderedDict
 
 from galaxy.util import (
     hash_util,
-    plugin_config
+    plugin_config,
+    string_as_bool,
 )
 from galaxy.util.oset import OrderedSet
 from .container_resolvers import ContainerResolver
@@ -24,8 +25,6 @@ from .resolvers import (
     ContainerDependency,
     NullDependency,
 )
-from .resolvers.conda import CondaDependencyResolver
-from .resolvers.galaxy_packages import GalaxyPackageDependencyResolver
 from .resolvers.tool_shed_packages import ToolShedPackageDependencyResolver
 
 log = logging.getLogger(__name__)
@@ -33,14 +32,59 @@ log = logging.getLogger(__name__)
 CONFIG_VAL_NOT_FOUND = object()
 
 
-def build_dependency_manager(config):
-    if getattr(config, "use_tool_dependencies", False):
-        dependency_manager_kwds = {
-            'default_base_path': config.tool_dependency_dir,
-            'conf_file': config.dependency_resolvers_config_file,
-            'app_config': config,
+def build_dependency_manager(app_config_dict=None, resolution_config_dict=None, conf_file=None, default_tool_dependency_dir=None):
+    """Build a DependencyManager object from app and/or resolution config.
+
+    If app_config_dict is specified, it should be application configuration information
+    and configuration options are generally named to identify the context of dependency
+    management (e.g. conda_prefix not prefix or use_cached_dependency_manager not cache).
+    resolution_config_dict if specified is assumed to be the to_dict() version of a
+    DependencyManager and should only contain dependency configuration options.
+    """
+
+    if app_config_dict is None:
+        app_config_dict = {}
+    else:
+        app_config_dict = app_config_dict.copy()
+
+    tool_dependency_dir = app_config_dict.get("tool_dependency_dir", default_tool_dependency_dir)
+    if tool_dependency_dir and tool_dependency_dir.lower() == "none":
+        app_config_dict["tool_dependency_dir"] = None
+
+    if resolution_config_dict is None and "dependency_resolution" in app_config_dict:
+        resolution_config_dict = app_config_dict["dependency_resolution"]
+
+    if resolution_config_dict:
+        # Convert local to_dict options into global ones.
+
+        # to_dict() has "cache", "cache_dir", "use", "default_base_path", "resolvers", "precache"
+        app_config_props_from_resolution_config = {
+            "use_tool_dependencies": resolution_config_dict.get("use", None),
+            "tool_dependency_dir": resolution_config_dict.get("default_base_path", None),
+            "dependency_resolvers": resolution_config_dict.get("resolvers", None),
+            "tool_dependency_cache_dir": resolution_config_dict.get("cache_dir", None),
+            "precache_dependencies": resolution_config_dict.get("precache", None),
+            "use_cached_dependency_manager": resolution_config_dict.get("cache", None),
         }
-        if getattr(config, "use_cached_dependency_manager", False):
+
+        for key, value in app_config_props_from_resolution_config.items():
+            if value is not None:
+                app_config_dict[key] = value
+
+    use_tool_dependencies = app_config_dict.get("use_tool_dependencies", None)
+    # if we haven't set an explicit True or False, try to infer from config...
+    if use_tool_dependencies is None:
+        use_tool_dependencies = app_config_dict.get("tool_dependency_dir", default_tool_dependency_dir) is not None or \
+            app_config_dict.get("dependency_resolvers") or \
+            (conf_file and os.path.exists(conf_file))
+
+    if use_tool_dependencies:
+        dependency_manager_kwds = {
+            "default_base_path": app_config_dict.get("tool_dependency_dir", default_tool_dependency_dir),
+            "conf_file": conf_file,
+            "app_config": app_config_dict,
+        }
+        if string_as_bool(app_config_dict.get("use_cached_dependency_manager")):
             dependency_manager = CachedDependencyManager(**dependency_manager_kwds)
         else:
             dependency_manager = DependencyManager(**dependency_manager_kwds)
@@ -61,6 +105,7 @@ class DependencyManager(object):
     and should each contain a file 'env.sh' which can be sourced to make the
     dependency available in the current shell environment.
     """
+    cached = False
 
     def __init__(self, default_base_path, conf_file=None, app_config={}):
         """
@@ -74,7 +119,14 @@ class DependencyManager(object):
         self.__app_config = app_config
         self.default_base_path = os.path.abspath(default_base_path)
         self.resolver_classes = self.__resolvers_dict()
-        self.dependency_resolvers = self.__build_dependency_resolvers(conf_file)
+
+        plugin_source = None
+        dependency_resolver_dicts = app_config.get("dependency_resolvers")
+        if dependency_resolver_dicts is not None:
+            plugin_source = plugin_config.PluginConfigSource('dict', dependency_resolver_dicts)
+        else:
+            plugin_source = self.__build_dependency_resolvers_plugin_source(conf_file)
+        self.dependency_resolvers = self.__parse_resolver_conf_plugins(plugin_source)
         self._enabled_container_types = []
         self._destination_for_container_type = {}
 
@@ -121,6 +173,10 @@ class DependencyManager(object):
             value = default
         return value
 
+    @property
+    def precache(self):
+        return string_as_bool(self.get_app_option("precache_dependencies", True))
+
     def dependency_shell_commands(self, requirements, **kwds):
         requirements_to_dependencies = self.requirements_to_dependencies(requirements, **kwds)
         ordered_dependencies = OrderedSet(requirements_to_dependencies.values())
@@ -145,11 +201,22 @@ class DependencyManager(object):
         index = kwds.get('index')
         install = kwds.get('install', False)
         resolver_type = kwds.get('resolver_type')
+        include_containers = kwds.get('include_containers', False)
+        container_type = kwds.get('container_type')
         require_exact = kwds.get('exact', False)
         return_null_dependencies = kwds.get('return_null', False)
 
         resolvable_requirements = requirements.resolvable
-        tool_info = ToolInfo(requirements=resolvable_requirements)
+
+        tool_info_kwds = dict(requirements=resolvable_requirements)
+        if 'tool_instance' in kwds:
+            tool = kwds['tool_instance']
+            tool_info_kwds['tool_id'] = tool.id
+            tool_info_kwds['tool_version'] = tool.version
+            tool_info_kwds['container_descriptions'] = tool.containers
+            tool_info_kwds['requires_galaxy_python_environment'] = tool.requires_galaxy_python_environment
+
+        tool_info = ToolInfo(**tool_info_kwds)
 
         for i, resolver in enumerate(self.dependency_resolvers):
 
@@ -159,22 +226,26 @@ class DependencyManager(object):
             if resolver_type is not None and resolver.resolver_type != resolver_type:
                 continue
 
+            if container_type is not None and getattr(resolver, "container_type", None) != container_type:
+                continue
+
             _requirement_to_dependency = OrderedDict([(k, v) for k, v in requirement_to_dependency.items() if not isinstance(v, NullDependency)])
 
             if len(_requirement_to_dependency) == len(resolvable_requirements):
                 # Shortcut - resolution complete.
                 break
 
-            if resolver.resolver_type.startswith('build_mulled') and not install:
-                # don't want to build images here
-                continue
-
             # Check requirements all at once
             all_unmet = len(_requirement_to_dependency) == 0
             if hasattr(resolver, "resolve_all"):
                 resolve = resolver.resolve_all
             elif isinstance(resolver, ContainerResolver):
-                if not resolver.resolver_type.startswith(('cached', 'explicit')) and not (search or install):
+                if not include_containers:
+                    continue
+                if not install and resolver.builds_on_resolution:
+                    # don't want to build images here
+                    continue
+                if not resolver.resolver_type.startswith(('cached', 'explicit', 'fallback')) and not (search or install):
                     # These would look up available containers using the quay API,
                     # we only want to do this if we search for containers
                     continue
@@ -190,7 +261,7 @@ class DependencyManager(object):
                                        **kwds)
                 if dependencies:
                     if isinstance(dependencies, ContainerDescription):
-                        dependencies = [ContainerDependency(dependencies, name=r.name, version=r.version) for r in resolvable_requirements]
+                        dependencies = [ContainerDependency(dependencies, name=r.name, version=r.version, container_resolver=resolver) for r in resolvable_requirements]
                     assert len(dependencies) == len(resolvable_requirements)
                     for requirement, dependency in zip(resolvable_requirements, dependencies):
                         log.debug(dependency.resolver_msg)
@@ -232,39 +303,52 @@ class DependencyManager(object):
         else:
             return NullDependency(name=name, version=version)
 
-    def __build_dependency_resolvers(self, conf_file):
+    def __build_dependency_resolvers_plugin_source(self, conf_file):
         if not conf_file:
-            return self.__default_dependency_resolvers()
+            return self.__default_dependency_resolvers_source()
         if not os.path.exists(conf_file):
             log.debug("Unable to find config file '%s'", conf_file)
-            return self.__default_dependency_resolvers()
+            return self.__default_dependency_resolvers_source()
         plugin_source = plugin_config.plugin_source_from_path(conf_file)
-        return self.__parse_resolver_conf_xml(plugin_source)
+        return plugin_source
 
-    def __default_dependency_resolvers(self):
-        return [
-            ToolShedPackageDependencyResolver(self),
-            GalaxyPackageDependencyResolver(self),
-            CondaDependencyResolver(self),
-            GalaxyPackageDependencyResolver(self, versionless=True),
-            CondaDependencyResolver(self, versionless=True),
-        ]
+    def __default_dependency_resolvers_source(self):
+        return plugin_config.PluginConfigSource('dict', [
+            {"type": "tool_shed_packages"},
+            {"type": "galaxy_packages"},
+            {"type": "conda"},
+            {"type": "galaxy_packages", "versionless": True},
+            {"type": "conda", "versionless": True},
+        ])
 
-    def __parse_resolver_conf_xml(self, plugin_source):
+    def __parse_resolver_conf_plugins(self, plugin_source):
         """
         """
         extra_kwds = dict(dependency_manager=self)
-        return plugin_config.load_plugins(self.resolver_classes, plugin_source, extra_kwds)
+        # Use either 'type' from YAML definition or 'resolver_type' from to_dict definition.
+        return plugin_config.load_plugins(self.resolver_classes, plugin_source, extra_kwds, plugin_type_keys=['type', 'resolver_type'])
 
     def __resolvers_dict(self):
         import galaxy.tool_util.deps.resolvers
         return plugin_config.plugins_dict(galaxy.tool_util.deps.resolvers, 'resolver_type')
 
+    def to_dict(self):
+        return {
+            "use": True,
+            "cache": self.cached,
+            "precache": self.precache,
+            "cache_dir": getattr(self, "tool_dependency_cache_dir", None),
+            "default_base_path": self.default_base_path,
+            "resolvers": [m.to_dict() for m in self.dependency_resolvers],
+        }
+
 
 class CachedDependencyManager(DependencyManager):
-    def __init__(self, default_base_path, conf_file=None, app_config={}, tool_dependency_cache_dir=None):
-        super(CachedDependencyManager, self).__init__(default_base_path=default_base_path, conf_file=conf_file, app_config=app_config)
-        self.tool_dependency_cache_dir = self.get_app_option("tool_dependency_cache_dir")
+    cached = True
+
+    def __init__(self, default_base_path, **kwd):
+        super(CachedDependencyManager, self).__init__(default_base_path=default_base_path, **kwd)
+        self.tool_dependency_cache_dir = self.get_app_option("tool_dependency_cache_dir") or os.path.join(default_base_path, "_cache")
 
     def build_cache(self, requirements, **kwds):
         resolved_dependencies = self.requirements_to_dependencies(requirements, **kwds)
@@ -293,7 +377,7 @@ class CachedDependencyManager(DependencyManager):
         resolved_dependencies = self.requirements_to_dependencies(requirements, **kwds)
         cacheable_dependencies = [dep for dep in resolved_dependencies.values() if dep.cacheable]
         hashed_dependencies_dir = self.get_hashed_dependencies_path(cacheable_dependencies)
-        if not os.path.exists(hashed_dependencies_dir) and self.get_app_option("precache_dependencies", False):
+        if not os.path.exists(hashed_dependencies_dir) and self.precache:
             # Cache not present, try to create it
             self.build_cache(requirements, **kwds)
         if os.path.exists(hashed_dependencies_dir):
@@ -322,6 +406,7 @@ class CachedDependencyManager(DependencyManager):
 
 
 class NullDependencyManager(DependencyManager):
+    cached = False
 
     def __init__(self, default_base_path=None, conf_file=None, app_config={}):
         self.__app_config = app_config
@@ -329,6 +414,7 @@ class NullDependencyManager(DependencyManager):
         self.dependency_resolvers = []
         self._enabled_container_types = []
         self._destination_for_container_type = {}
+        self.default_base_path = None
 
     def uses_tool_shed_dependencies(self):
         return False
@@ -338,3 +424,6 @@ class NullDependencyManager(DependencyManager):
 
     def find_dep(self, name, version=None, type='package', **kwds):
         return NullDependency(version=version, name=name)
+
+    def to_dict(self):
+        return {"use": False}

@@ -1,7 +1,7 @@
 import os
 from copy import deepcopy
-from xml.etree import ElementInclude, ElementTree
 
+from galaxy.util import parse_xml
 
 REQUIRED_PARAMETER = object()
 
@@ -49,7 +49,7 @@ def raw_xml_tree(path):
     """ Load raw (no macro expansion) tree representation of XML represented
     at the specified path.
     """
-    tree = _parse_xml(path)
+    tree = parse_xml(path, strip_whitespace=False, remove_comments=True)
     return tree
 
 
@@ -173,7 +173,7 @@ def _expand_yield_statements(macro_def, expand_el):
             if macro_def_el.tag == "yield":
                 for target in expand_el_children:
                     i += 1
-                    macro_def.insert(i, deepcopy(target))
+                    macro_def.insert(i, target)
                 macro_def.remove(macro_def_el)
                 continue
 
@@ -244,7 +244,7 @@ def _imported_macro_paths_from_el(macros_el):
 
 
 def _load_macro_file(path, xml_base_dir):
-    tree = _parse_xml(path)
+    tree = parse_xml(path)
     root = tree.getroot()
     return _load_macros(root, xml_base_dir)
 
@@ -303,13 +303,6 @@ class XmlMacroDef(object):
             token_name = "%s%s%s" % (wrap_char, key.upper(), wrap_char)
             tokens[token_name] = token_value
         return tokens
-
-
-def _parse_xml(fname):
-    tree = ElementTree.parse(fname)
-    root = tree.getroot()
-    ElementInclude.include(root)
-    return tree
 
 
 __all__ = (

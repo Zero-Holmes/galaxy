@@ -3,19 +3,18 @@ import $ from "jquery";
 import Backbone from "backbone";
 import { getAppRoot } from "onload/loadConfig";
 import { getGalaxyInstance } from "app";
-import Data from "layout/data";
 import Masthead from "layout/masthead";
 import Panel from "layout/panel";
 import Modal from "mvc/ui/ui-modal";
 import Utils from "utils/utils";
 
-var View = Backbone.View.extend({
+const View = Backbone.View.extend({
     el: "body",
     className: "full-content",
     _panelids: ["left", "right"],
 
-    initialize: function(options) {
-        var self = this;
+    initialize: function (options) {
+        const self = this;
         this.config = _.defaults(options.config || {}, {
             message_box_visible: false,
             message_box_content: "",
@@ -23,19 +22,18 @@ var View = Backbone.View.extend({
             show_inactivity_warning: false,
             inactivity_box_content: "",
             hide_panels: false,
-            hide_masthead: false
+            hide_masthead: false,
         });
 
         // attach global objects, build mastheads
         const Galaxy = getGalaxyInstance();
         Galaxy.modal = this.modal = new Modal.View();
         Galaxy.router = this.router = options.Router && new options.Router(self, options);
-        Galaxy.data = this.data = new Data(this);
         this.masthead = new Masthead.View(this.config);
         this.center = new Panel.CenterPanel();
 
         // display helper
-        Galaxy.display = this.display = view => {
+        Galaxy.display = this.display = (view) => {
             if (view.title) {
                 Utils.setWindowTitle(view.title);
                 view.allow_title_display = false;
@@ -71,17 +69,17 @@ var View = Backbone.View.extend({
         // build panels
         this.panels = {};
         if (!this.config.hide_panels) {
-            _.each(this._panelids, panel_id => {
-                var panel_class_name = panel_id.charAt(0).toUpperCase() + panel_id.slice(1);
-                var panel_class = options[panel_class_name];
+            _.each(this._panelids, (panel_id) => {
+                const panel_class_name = panel_id.charAt(0).toUpperCase() + panel_id.slice(1);
+                const panel_class = options[panel_class_name];
                 if (panel_class) {
-                    var panel_instance = new panel_class(self, options);
-                    var panel_el = self.$(`#${panel_id}`);
+                    const panel_instance = new panel_class(self, options);
+                    const panel_el = self.$(`#${panel_id}`);
                     self[panel_instance.toString()] = panel_instance;
                     self.panels[panel_id] = new Panel.SidePanel({
                         id: panel_id,
                         el: panel_el,
-                        view: panel_instance
+                        view: panel_instance,
                     });
                     if (this.config.hide_masthead) {
                         panel_el.css("top", 0);
@@ -95,12 +93,12 @@ var View = Backbone.View.extend({
         if (this.router) {
             Backbone.history.start({
                 root: getAppRoot(),
-                pushState: true
+                pushState: true,
             });
         }
     },
 
-    render: function() {
+    render: function () {
         // TODO: Remove this line after select2 update
         $(".select2-hidden-accessible").remove();
         if (!this.config.hide_masthead) {
@@ -114,16 +112,12 @@ var View = Backbone.View.extend({
     },
 
     /** Render message box */
-    renderMessageBox: function() {
+    renderMessageBox: function () {
         if (this.config.message_box_visible) {
-            var content = this.config.message_box_content || "";
-            var level = this.config.message_box_class || "info";
+            const content = this.config.message_box_content || "";
+            const level = this.config.message_box_class || "info";
             this.$el.addClass("has-message-box");
-            this.$messagebox
-                .attr("class", `panel-${level}-message`)
-                .html(content)
-                .toggle(!!content)
-                .show();
+            this.$messagebox.attr("class", `panel-${level}-message`).html(content).toggle(!!content).show();
         } else {
             this.$el.removeClass("has-message-box");
             this.$messagebox.hide();
@@ -132,18 +126,14 @@ var View = Backbone.View.extend({
     },
 
     /** Render inactivity warning */
-    renderInactivityBox: function() {
+    renderInactivityBox: function () {
         if (this.config.show_inactivity_warning) {
-            var content = this.config.inactivity_box_content || "";
-            var verificationLink = $("<a/>")
+            const content = this.config.inactivity_box_content || "";
+            const verificationLink = $("<a/>")
                 .attr("href", `${getAppRoot()}user/resend_verification`)
                 .text("Resend verification");
             this.$el.addClass("has-inactivity-box");
-            this.$inactivebox
-                .html(`${content} `)
-                .append(verificationLink)
-                .toggle(!!content)
-                .show();
+            this.$inactivebox.html(`${content} `).append(verificationLink).toggle(!!content).show();
         } else {
             this.$el.removeClass("has-inactivity-box");
             this.$inactivebox.hide();
@@ -152,10 +142,10 @@ var View = Backbone.View.extend({
     },
 
     /** Render panels */
-    renderPanels: function() {
-        var self = this;
-        _.each(this._panelids, panel_id => {
-            var panel = self.panels[panel_id];
+    renderPanels: function () {
+        const self = this;
+        _.each(this._panelids, (panel_id) => {
+            const panel = self.panels[panel_id];
             if (panel) {
                 panel.render();
             } else {
@@ -167,41 +157,41 @@ var View = Backbone.View.extend({
     },
 
     /** body template */
-    _template: function() {
+    _template: function () {
         return [
             `<div id="everything">
                 <div id="background"/>
                 <div id="masthead"/>
-                <div id="messagebox"/>
-                <div id="inactivebox" class="panel-warning-message" />
+                <div id="messagebox" class="full-message"/>
+                <div id="inactivebox" class="full-message panel-warning-message" />
                 <div id="columns">
                     <div id="left" class="unified-panel"/>
                     <div id="center" />
                     <div id="right" class="unified-panel" />
                 </div>
             </div>
-            <div id="dd-helper" />`
+            <div id="dd-helper" />`,
         ].join("");
     },
 
-    toString: function() {
+    toString: function () {
         return "PageLayoutView";
     },
 
     /** Check if the communication server is online and show the icon otherwise hide the icon */
-    _checkCommunicationServerOnline: function() {
+    _checkCommunicationServerOnline: function () {
         const Galaxy = getGalaxyInstance();
-        var host = Galaxy.config.communication_server_host;
-        var port = Galaxy.config.communication_server_port;
-        var preferences = Galaxy.user.attributes.preferences;
-        var $chat_icon_element = $("#show-chat-online");
+        const host = Galaxy.config.communication_server_host;
+        const port = Galaxy.config.communication_server_port;
+        const preferences = Galaxy.user.attributes.preferences;
+        const $chat_icon_element = $("#show-chat-online");
         /** Check if the user has deactivated the communication in it's personal settings */
         if (preferences && ["1", "true"].indexOf(preferences.communication_server) != -1) {
             // See if the configured communication server is available
             $.ajax({
-                url: `${host}:${port}`
+                url: `${host}:${port}`,
             })
-                .success(data => {
+                .success((data) => {
                     // enable communication only when a user is logged in
                     if (Galaxy.user.id !== null) {
                         if ($chat_icon_element.css("visibility") === "hidden") {
@@ -209,14 +199,14 @@ var View = Backbone.View.extend({
                         }
                     }
                 })
-                .error(data => {
+                .error((data) => {
                     // hide the communication icon if the communication server is not available
                     $chat_icon_element.css("visibility", "hidden");
                 });
         } else {
             $chat_icon_element.css("visibility", "hidden");
         }
-    }
+    },
 });
 
 export default { View: View };

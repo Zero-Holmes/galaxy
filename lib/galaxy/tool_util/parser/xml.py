@@ -3,14 +3,17 @@ import re
 import sys
 import traceback
 import uuid
+from collections import OrderedDict
 from math import isinf
 
 import packaging.version
 
 from galaxy.tool_util.deps import requirements
+from galaxy.tool_util.parser.util import (
+    DEFAULT_DELTA,
+    DEFAULT_DELTA_FRAC
+)
 from galaxy.util import string_as_bool, xml_text, xml_to_string
-from galaxy.util.odict import odict
-from .error_level import StdioErrorLevel
 from .interface import (
     InputSource,
     PageSource,
@@ -18,8 +21,6 @@ from .interface import (
     TestCollectionDef,
     TestCollectionOutputDef,
     ToolSource,
-    ToolStdioExitCode,
-    ToolStdioRegex,
 )
 from .output_actions import ToolOutputActionGroup
 from .output_collection_def import dataset_collector_descriptions_from_elem
@@ -29,9 +30,12 @@ from .output_objects import (
     ToolOutputCollection,
     ToolOutputCollectionStructure
 )
-from .util import (
+from .stdio import (
     aggressive_error_checks,
     error_on_exit_code,
+    StdioErrorLevel,
+    ToolStdioExitCode,
+    ToolStdioRegex,
 )
 
 
@@ -48,6 +52,9 @@ class XmlToolSource(ToolSource):
         self._source_path = source_path
         self._macro_paths = macro_paths or []
         self.legacy_defaults = self.parse_profile() == "16.01"
+
+    def to_string(self):
+        return xml_to_string(self.root)
 
     def parse_version(self):
         return self.root.get("version", None)
@@ -95,6 +102,12 @@ class XmlToolSource(ToolSource):
             return []
         return [edam_topic.text for edam_topic in edam_topics.findall("edam_topic")]
 
+    def parse_xrefs(self):
+        xrefs = self.root.find("xrefs")
+        if xrefs is None:
+            return []
+        return [dict(value=xref.text.strip(), reftype=xref.attrib['type']) for xref in xrefs.findall("xref") if xref.get("type")]
+
     def parse_description(self):
         return xml_text(self.root, "description")
 
@@ -132,9 +145,18 @@ class XmlToolSource(ToolSource):
 
         environment_variables = []
         for environment_variable_el in environment_variables_el.findall("environment_variable"):
+            template = environment_variable_el.text
+            inject = environment_variable_el.get("inject")
+            if inject:
+                assert not template, "Cannot specify inject and environment variable template."
+                assert inject in ["api_key"]
+            if template:
+                assert not inject, "Cannot specify inject and environment variable template."
             definition = {
                 "name": environment_variable_el.get("name"),
-                "template": environment_variable_el.text,
+                "template": template,
+                "inject": inject,
+                "strip": string_as_bool(environment_variable_el.get("strip", False)),
             }
             environment_variables.append(
                 definition
@@ -191,9 +213,27 @@ class XmlToolSource(ToolSource):
         parallelism = self.root.find("parallelism")
         parallelism_info = None
         if parallelism is not None and parallelism.get("method"):
-            from galaxy.jobs import ParallelismInfo
             return ParallelismInfo(parallelism)
         return parallelism_info
+
+    def parse_interactivetool(self):
+        interactivetool_el = self.root.find("entry_points")
+        rtt = []
+        if interactivetool_el is None:
+            return rtt
+        for ep_el in interactivetool_el.findall("entry_point"):
+            port = ep_el.find("port")
+            assert port is not None, ValueError('A port is required for InteractiveTools')
+            port = port.text.strip()
+            url = ep_el.find("url")
+            if url is not None:
+                url = url.text.strip()
+            name = ep_el.get('name', None)
+            if name:
+                name = name.strip()
+            requires_domain = string_as_bool(ep_el.attrib.get("requires_domain", False))
+            rtt.append(dict(port=port, url=url, name=name, requires_domain=requires_domain))
+        return rtt
 
     def parse_hidden(self):
         hidden = xml_text(self.root, "hidden")
@@ -215,7 +255,6 @@ class XmlToolSource(ToolSource):
         for option_elem in root.findall("options"):
             if key in option_elem.attrib:
                 return string_as_bool(option_elem.get(key))
-
         return default
 
     @property
@@ -255,12 +294,12 @@ class XmlToolSource(ToolSource):
 
     def parse_outputs(self, tool):
         out_elem = self.root.find("outputs")
-        outputs = odict()
-        output_collections = odict()
+        outputs = OrderedDict()
+        output_collections = OrderedDict()
         if out_elem is None:
             return outputs, output_collections
 
-        data_dict = odict()
+        data_dict = OrderedDict()
 
         def _parse(data_elem, **kwds):
             output_def = self._parse_output(data_elem, tool, **kwds)
@@ -499,6 +538,7 @@ def _test_elem_to_dict(test_elem, i):
         inputs=__parse_input_elems(test_elem, i),
         expect_num_outputs=test_elem.get("expect_num_outputs"),
         command=__parse_assert_list_from_elem(test_elem.find("assert_command")),
+        command_version=__parse_assert_list_from_elem(test_elem.find("assert_command_version")),
         stdout=__parse_assert_list_from_elem(test_elem.find("assert_stdout")),
         stderr=__parse_assert_list_from_elem(test_elem.find("assert_stderr")),
         expect_exit_code=test_elem.get("expect_exit_code"),
@@ -579,7 +619,8 @@ def __parse_test_attributes(output_elem, attrib, parse_elements=False, parse_dis
     # Number of lines to allow to vary in logs (for dates, etc)
     attributes['lines_diff'] = int(attrib.pop('lines_diff', '0'))
     # Allow a file size to vary if sim_size compare
-    attributes['delta'] = int(attrib.pop('delta', '10000'))
+    attributes['delta'] = int(attrib.pop('delta', DEFAULT_DELTA))
+    attributes['delta_frac'] = float(attrib['delta_frac']) if 'delta_frac' in attrib else DEFAULT_DELTA_FRAC
     attributes['sort'] = string_as_bool(attrib.pop('sort', False))
     attributes['decompress'] = string_as_bool(attrib.pop('decompress', False))
     extra_files = []
@@ -677,21 +718,18 @@ def __expand_input_elems(root_elem, prefix=""):
         new_prefix = __prefix_join(prefix, name, index=index)
         __expand_input_elems(repeat_elem, new_prefix)
         __pull_up_params(root_elem, repeat_elem)
-        root_elem.remove(repeat_elem)
 
     cond_elems = root_elem.findall('conditional')
     for cond_elem in cond_elems:
         new_prefix = __prefix_join(prefix, cond_elem.get("name"))
         __expand_input_elems(cond_elem, new_prefix)
         __pull_up_params(root_elem, cond_elem)
-        root_elem.remove(cond_elem)
 
     section_elems = root_elem.findall('section')
     for section_elem in section_elems:
         new_prefix = __prefix_join(prefix, section_elem.get("name"))
         __expand_input_elems(section_elem, new_prefix)
         __pull_up_params(root_elem, section_elem)
-        root_elem.remove(section_elem)
 
 
 def __append_prefix_to_params(elem, prefix):
@@ -702,7 +740,6 @@ def __append_prefix_to_params(elem, prefix):
 def __pull_up_params(parent_elem, child_elem):
     for param_elem in child_elem.findall('param'):
         parent_elem.append(param_elem)
-        child_elem.remove(param_elem)
 
 
 def __prefix_join(prefix, name, index=None):
@@ -949,6 +986,8 @@ class StdioParser(object):
             if err_level:
                 if (re.search("log", err_level, re.IGNORECASE)):
                     return_level = StdioErrorLevel.LOG
+                elif (re.search("qc", err_level, re.IGNORECASE)):
+                    return_level = StdioErrorLevel.QC
                 elif (re.search("warning", err_level, re.IGNORECASE)):
                     return_level = StdioErrorLevel.WARNING
                 elif (re.search("fatal_oom", err_level, re.IGNORECASE)):
@@ -1048,7 +1087,7 @@ class XmlInputSource(InputSource):
         return static_options
 
     def parse_optional(self, default=None):
-        """ Return boolean indicating wheter parameter is optional. """
+        """ Return boolean indicating whether parameter is optional. """
         elem = self.input_elem
         if self.get('type') == "data_column":
             # Allow specifing force_select for backward compat., but probably
@@ -1092,3 +1131,22 @@ class XmlInputSource(InputSource):
             case_page_source = XmlPageSource(case_elem)
             sources.append((value, case_page_source))
         return sources
+
+
+class ParallelismInfo(object):
+    """
+    Stores the information (if any) for running multiple instances of the tool in parallel
+    on the same set of inputs.
+    """
+
+    def __init__(self, tag):
+        self.method = tag.get('method')
+        if isinstance(tag, dict):
+            items = tag.items()
+        else:
+            items = tag.attrib.items()
+        self.attributes = dict([item for item in items if item[0] != 'method'])
+        if len(self.attributes) == 0:
+            # legacy basic mode - provide compatible defaults
+            self.attributes['split_size'] = 20
+            self.attributes['split_mode'] = 'number_of_parts'

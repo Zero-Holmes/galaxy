@@ -53,7 +53,7 @@ class RegexValidator(Validator):
     """
     Validator that evaluates a regular expression
 
-    >>> from xml.etree.ElementTree import XML
+    >>> from galaxy.util import XML
     >>> from galaxy.tools.parameters.basic import ToolParameter
     >>> p = ToolParameter.build(None, XML('''
     ... <param name="blah" type="text" value="10">
@@ -87,7 +87,7 @@ class ExpressionValidator(Validator):
     """
     Validator that evaluates a python expression using the value
 
-    >>> from xml.etree.ElementTree import XML
+    >>> from galaxy.util import XML
     >>> from galaxy.tools.parameters.basic import ToolParameter
     >>> p = ToolParameter.build(None, XML('''
     ... <param name="blah" type="text" value="10">
@@ -113,10 +113,15 @@ class ExpressionValidator(Validator):
         self.expression = compile(expression, '<string>', 'eval')
 
     def validate(self, value, trans=None):
-        if not(eval(self.expression, dict(value=value))):
-            message = self.message
-            if self.substitute_value_in_message:
-                message = message % value
+        message = self.message
+        if self.substitute_value_in_message:
+            message = message % value
+        try:
+            evalresult = eval(self.expression, dict(value=value))
+        except Exception:
+            log.debug("Validator %s could not be evaluated on %s" % (self.expression, str(value)), exc_info=True)
+            raise ValueError(message)
+        if not(evalresult):
             raise ValueError(message)
 
 
@@ -124,7 +129,7 @@ class InRangeValidator(Validator):
     """
     Validator that ensures a number is in a specified range
 
-    >>> from xml.etree.ElementTree import XML
+    >>> from galaxy.util import XML
     >>> from galaxy.tools.parameters.basic import ToolParameter
     >>> p = ToolParameter.build(None, XML('''
     ... <param name="blah" type="integer" value="10">
@@ -192,7 +197,7 @@ class LengthValidator(Validator):
     """
     Validator that ensures the length of the provided string (value) is in a specific range
 
-    >>> from xml.etree.ElementTree import XML
+    >>> from galaxy.util import XML
     >>> from galaxy.tools.parameters.basic import ToolParameter
     >>> p = ToolParameter.build(None, XML('''
     ... <param name="blah" type="text" value="foobar">

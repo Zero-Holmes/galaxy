@@ -24,7 +24,8 @@ from galaxy.datatypes.metadata import MetadataElement
 from galaxy.datatypes.sniff import (
     build_sniff_from_prefix,
     get_headers,
-    iter_headers
+    iter_headers,
+    validate_tabular,
 )
 from galaxy.util import compression_utils
 from . import dataproviders
@@ -120,6 +121,13 @@ class TabularData(data.Text):
                                        column_names=column_names,
                                        column_types=column_types)
 
+    def display_as_markdown(self, dataset_instance, markdown_format_helpers):
+        contents = open(dataset_instance.file_name, "r").read(data.DEFAULT_MAX_PEEK_SIZE)
+        markdown = self.make_html_table(dataset_instance, peek=contents)
+        if len(contents) == data.DEFAULT_MAX_PEEK_SIZE:
+            markdown += markdown_format_helpers.indicate_data_truncated()
+        return markdown_format_helpers.pre_formatted_contents(markdown)
+
     def make_html_table(self, dataset, **kwargs):
         """Create HTML table, used for displaying peek"""
         out = ['<table cellspacing="0" cellpadding="3">']
@@ -129,7 +137,7 @@ class TabularData(data.Text):
             out.append('</table>')
             out = "".join(out)
         except Exception as exc:
-            out = "Can't create peek %s" % str(exc)
+            out = "Can't create peek: %s" % util.unicodify(exc)
         return out
 
     def make_html_peek_header(self, dataset, skipchars=None, column_names=None, column_number_format='%s', column_parameter_alias=None, **kwargs):
@@ -175,7 +183,7 @@ class TabularData(data.Text):
             out.append('</tr>')
         except Exception as exc:
             log.exception('make_html_peek_header failed on HDA %s', dataset.id)
-            raise Exception("Can't create peek header %s" % str(exc))
+            raise Exception("Can't create peek header: %s" % util.unicodify(exc))
         return "".join(out)
 
     def make_html_peek_rows(self, dataset, skipchars=None, **kwargs):
@@ -183,12 +191,15 @@ class TabularData(data.Text):
             skipchars = []
         out = []
         try:
-            if not dataset.peek:
-                dataset.set_peek()
+            peek = kwargs.get("peek")
+            if peek is None:
+                if not dataset.peek:
+                    dataset.set_peek()
+                peek = dataset.peek
             columns = dataset.metadata.columns
             if columns is None:
                 columns = dataset.metadata.spec.columns.no_value
-            for line in dataset.peek.splitlines():
+            for line in peek.splitlines():
                 if line.startswith(tuple(skipchars)):
                     out.append('<tr><td colspan="100%%">%s</td></tr>' % escape(line))
                 elif line:
@@ -206,7 +217,7 @@ class TabularData(data.Text):
                         out.append('</tr>')
         except Exception as exc:
             log.exception('make_html_peek_rows failed on HDA %s', dataset.id)
-            raise Exception("Can't create peek rows %s" % str(exc))
+            raise Exception("Can't create peek rows: %s" % util.unicodify(exc))
         return "".join(out)
 
     def display_peek(self, dataset):
@@ -730,6 +741,13 @@ class BaseVcf(Tabular):
         if exit_code != 0:
             raise Exception("Error merging VCF files: %s" % stderr)
 
+    def validate(self, dataset, **kwd):
+        def validate_row(row):
+            if len(row) < 8:
+                raise Exception("Not enough columns in row %s" % row.join("\t"))
+        validate_tabular(dataset.file_name, sep='\t', validate_row=validate_row, comment_designator="#")
+        return data.DatatypeValidation.validated()
+
     # Dataproviders
     @dataproviders.decorators.dataprovider_factory('genomic-region',
                                                    dataproviders.dataset.GenomicRegionDataProvider.settings)
@@ -780,7 +798,7 @@ class VcfGz(BaseVcf, binary.Binary):
         try:
             pysam.tabix_index(dataset.file_name, index=index_file.file_name, preset='vcf', force=True)
         except Exception as e:
-            raise Exception('Error setting VCF.gz metadata: %s' % (str(e)))
+            raise Exception('Error setting VCF.gz metadata: %s' % (util.unicodify(e)))
         dataset.metadata.tabix_index = index_file
 
 
@@ -807,7 +825,7 @@ class Eland(Tabular):
                              'PART_CONTIG', 'PART_OFFSET', 'PART_STRAND', 'FILT'
                              ]
 
-    def make_html_table(self, dataset, skipchars=None):
+    def make_html_table(self, dataset, skipchars=None, peek=None):
         """Create HTML table, used for displaying peek"""
         if skipchars is None:
             skipchars = []
@@ -822,7 +840,7 @@ class Eland(Tabular):
                 for i in range(len(self.column_names), dataset.metadata.columns):
                     out.append('<th>%s</th>' % str(i + 1))
                 out.append('</tr>')
-            out.append(self.make_html_peek_rows(dataset, skipchars=skipchars))
+            out.append(self.make_html_peek_rows(dataset, skipchars=skipchars, peek=peek))
             out.append('</table>')
             out = "".join(out)
         except Exception as exc:

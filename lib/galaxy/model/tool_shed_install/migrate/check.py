@@ -12,6 +12,13 @@ from sqlalchemy import (
     Table
 )
 from sqlalchemy.exc import NoSuchTableError
+from sqlalchemy_utils import (
+    create_database,
+    database_exists,
+)
+
+from galaxy.model.tool_shed_install import mapping
+
 
 log = logging.getLogger(__name__)
 
@@ -24,6 +31,11 @@ def create_or_verify_database(url, engine_options={}, app=None):
     """
     """
     # Create engine and metadata
+    if not database_exists(url):
+        message = "Creating database for URI [%s]" % url
+        log.info(message)
+        create_database(url)
+
     engine = create_engine(url, **engine_options)
 
     def migrate():
@@ -48,6 +60,12 @@ def create_or_verify_database(url, engine_options={}, app=None):
         # No table means a completely uninitialized database.  If we
         # have an app, we'll set its new_installation setting to True
         # so the tool migration process will be skipped.
+        log.info("Creating install database from scratch, skipping migrations")
+        mapping.init(url=url, create_tables=True)
+        current_version = migrate_repository.version().version
+        schema.ControlledSchema.create(engine, migrate_repository, version=current_version)
+        db_schema = schema.ControlledSchema(engine, migrate_repository)
+        assert db_schema.version == current_version
         migrate()
         return
 

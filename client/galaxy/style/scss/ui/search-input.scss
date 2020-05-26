@@ -1,26 +1,53 @@
-// search bar, see: scripts/jq-plugins/ui/search-input.js
 .search-input {
-    .search-query {
-        width: 100%;
-        padding-right: 24px;
+    ::placeholder {
+        color: $text-muted;
     }
+
+    border: $border-default;
+    border-radius: 1rem;
+    background: #fff;
+    .search-advanced,
     .search-clear,
     .search-loading {
-        // it places the icons on the right of the bar (and puts the lotion on its skin)
+        @extend .mr-2;
         position: relative;
-        display: inline-block;
-
         float: right;
-        margin-top: -25px;
-        margin-right: 4px;
-
-        font-size: 1.4em;
-        line-height: 23px;
-        color: grey;
+        top: -27px;
+        font-size: 1.2rem;
+        color: $text-muted;
     }
-
-    .search-clear:hover {
-        color: $link-color;
+    .search-advanced {
+        margin-right: 5px !important;
+    }
+    .search-advanced:hover {
+        color: $brand-info;
         cursor: pointer;
+    }
+    .search-clear:hover {
+        color: $brand-info;
+        cursor: pointer;
+    }
+    .search-loading {
+        display: none;
+    }
+    .search-query {
+        @extend .px-3;
+        @extend .form-control;
+        outline: 0px !important;
+        -webkit-appearance: none;
+        box-shadow: none !important;
+        width: 100%;
+        display: inline-block;
+        font-size: $font-size-base;
+        line-height: $line-height-base;
+        color: $text-color;
+        border: 0px;
+        @include border-radius($border-radius-extralarge);
+        max-width: auto;
+        background: $white;
+    }
+    .search-query:focus {
+        border-color: $brand-info;
+        outline: 0;
     }
 }

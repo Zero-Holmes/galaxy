@@ -1,24 +1,23 @@
 import collections
 import os
-import tempfile
 
 import pytest
 
-from base import integration_util  # noqa: I100,I202
-from galaxy.datatypes.registry import Registry  # noqa: I201
+from galaxy.datatypes.registry import Registry
 from galaxy.util.checkers import (
     is_bz2,
     is_gzip,
     is_zip
 )
 from galaxy.util.hash_util import md5_hash_file
+from galaxy_test.driver import integration_util
 from .test_upload_configuration_options import BaseUploadContentConfigurationInstance
 
 SCRIPT_DIRECTORY = os.path.abspath(os.path.dirname(__file__))
 TEST_FILE_DIR = '%s/../../lib/galaxy/datatypes/test' % SCRIPT_DIRECTORY
 TestData = collections.namedtuple('UploadDatatypesData', 'path datatype uploadable')
 GALAXY_ROOT = os.path.abspath('%s/../../' % SCRIPT_DIRECTORY)
-DATATYPES_CONFIG = os.path.join(GALAXY_ROOT, 'config/datatypes_conf.xml.sample')
+DATATYPES_CONFIG = os.path.join(GALAXY_ROOT, 'lib/galaxy/config/sample/datatypes_conf.xml.sample')
 PARENT_SNIFFER_MAP = {'fastqsolexa': 'fastq'}
 
 
@@ -43,15 +42,11 @@ def collect_test_data(registry):
 class UploadTestDatatypeDataTestCase(BaseUploadContentConfigurationInstance):
     framework_tool_and_types = False
     datatypes_conf_override = DATATYPES_CONFIG
+    object_store_config = None
+    object_store_config_path = None
 
 
 instance = integration_util.integration_module_instance(UploadTestDatatypeDataTestCase)
-
-
-@pytest.fixture
-def temp_file():
-    with tempfile.NamedTemporaryFile(delete=True, mode='wb') as fh:
-        yield fh
 
 
 registry = Registry()
@@ -61,6 +56,10 @@ TEST_CASES = collect_test_data(registry)
 
 @pytest.mark.parametrize('test_data', TEST_CASES.values(), ids=list(TEST_CASES.keys()))
 def test_upload_datatype_auto(instance, test_data, temp_file):
+    upload_datatype_helper(instance, test_data, temp_file)
+
+
+def upload_datatype_helper(instance, test_data, temp_file):
     is_compressed = False
     for is_method in (is_bz2, is_gzip, is_zip):
         is_compressed = is_method(test_data.path)

@@ -6,8 +6,11 @@ from six import string_types
 
 import galaxy.tools.parameters.basic
 import galaxy.tools.parameters.grouping
-from galaxy.tools.verify.interactor import ToolTestDescription
-from galaxy.util import string_as_bool
+from galaxy.tool_util.verify.interactor import ToolTestDescription
+from galaxy.util import (
+    string_as_bool,
+    unicodify,
+)
 
 try:
     from nose.tools import nottest
@@ -21,7 +24,7 @@ log = logging.getLogger(__name__)
 @nottest
 def parse_tests(tool, tests_source):
     """
-    Build ToolTestBuilder objects for each "<test>" elements and
+    Build ToolTestDescription objects for each "<test>" elements and
     return default interactor (if any).
     """
     raw_tests_dict = tests_source.parse_tests_to_dict()
@@ -47,6 +50,7 @@ def description_from_tool_object(tool, test_index, raw_test_dict):
             "output_collections": raw_test_dict["output_collections"],
             "num_outputs": num_outputs,
             "command_line": raw_test_dict.get("command", None),
+            "command_version": raw_test_dict.get("command_version", None),
             "stdout": raw_test_dict.get("stdout", None),
             "stderr": raw_test_dict.get("stderr", None),
             "expect_exit_code": raw_test_dict.get("expect_exit_code", None),
@@ -63,7 +67,7 @@ def description_from_tool_object(tool, test_index, raw_test_dict):
             "test_index": test_index,
             "inputs": {},
             "error": True,
-            "exception": str(e),
+            "exception": unicodify(e),
         }
 
     return ToolTestDescription(processed_test_dict)

@@ -44,28 +44,26 @@
 ## Default stylesheets
 <%def name="stylesheets()">
     ${h.css('bootstrap-tour')}
-    ${h.css('base')}
+    ${h.dist_css('base')}
 </%def>
 
 ## Default javascripts
 <%def name="javascripts()">
     ## TODO: remove when all libs are required directly in modules
-    ${h.js(
-        'bundled/libs.chunk',
-        'bundled/base.chunk'
+    ${h.dist_js(
+        'libs.chunk',
+        'base.chunk',
+        'generic.bundled'
     )}
-    ${self.javascript_entry()}
-</%def>
-
-<%def name="javascript_entry()">
-    ${h.js('bundled/generic.bundled')}
 </%def>
 
 <%def name="javascript_app()">
 
     ${ galaxy_client.load( app=self.js_app ) }
     ${ galaxy_client.config_sentry( app=self.js_app ) }
-    ${ galaxy_client.config_google_analytics( app=self.js_app ) }
+    %if self.js_app and self.js_app.config and self.js_app.config.ga_code:
+        ${ galaxy_client.config_google_analytics(self.js_app.config.ga_code) }
+    %endif
 
     %if not form_input_auto_focus is UNDEFINED and form_input_auto_focus:
         <script type="text/javascript">

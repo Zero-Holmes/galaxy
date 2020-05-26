@@ -1,6 +1,5 @@
 """
 Galaxy Metadata
-
 """
 
 import copy
@@ -11,17 +10,22 @@ import shutil
 import sys
 import tempfile
 import weakref
+from collections import OrderedDict
 from os.path import abspath
 
 from six import string_types
 from sqlalchemy.orm import object_session
 
 import galaxy.model
-from galaxy.util import (form_builder, listify, string_as_bool,
-                         stringify_dictionary_keys)
+from galaxy.util import (
+    form_builder,
+    listify,
+    string_as_bool,
+    stringify_dictionary_keys,
+    unicodify,
+)
 from galaxy.util.json import safe_dumps
 from galaxy.util.object_wrapper import sanitize_lists_to_string
-from galaxy.util.odict import odict
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +46,7 @@ class Statement(object):
     def __call__(self, *args, **kwargs):
         # get the locals dictionary of the frame object one down in the call stack (i.e. the Datatype class calling MetadataElement)
         class_locals = sys._getframe(1).f_locals
-        # get and set '__galaxy_statments__' to an empty list if not in locals dict
+        # get and set '__galaxy_statements__' to an empty list if not in locals dict
         statements = class_locals.setdefault(STATEMENTS, [])
         # add Statement containing info to populate a MetadataElementSpec
         statements.append((self, args, kwargs))
@@ -154,7 +158,8 @@ class MetadataCollection(object):
         dataset = self.parent
         if filename is not None:
             log.debug('loading metadata from file for: %s %s' % (dataset.__class__.__name__, dataset.id))
-            JSONified_dict = json.load(open(filename))
+            with open(filename) as fh:
+                JSONified_dict = json.load(fh)
         elif json_dict is not None:
             log.debug('loading metadata from dict for: %s %s' % (dataset.__class__.__name__, dataset.id))
             if isinstance(json_dict, string_types):
@@ -189,6 +194,10 @@ class MetadataCollection(object):
             dataset._metadata[name] = value
         if '__extension__' in JSONified_dict:
             dataset.extension = JSONified_dict['__extension__']
+        if '__validated_state__' in JSONified_dict:
+            dataset.validated_state = JSONified_dict['__validated_state__']
+        if '__validated_state_message__' in JSONified_dict:
+            dataset.validated_state_message = JSONified_dict['__validated_state_message__']
 
     def to_JSON_dict(self, filename=None):
         # galaxy.model.customtypes.json_encoder.encode()
@@ -199,9 +208,14 @@ class MetadataCollection(object):
                 meta_dict[name] = spec.param.to_external_value(dataset_meta_dict[name])
         if '__extension__' in dataset_meta_dict:
             meta_dict['__extension__'] = dataset_meta_dict['__extension__']
+        if '__validated_state__' in dataset_meta_dict:
+            meta_dict['__validated_state__'] = dataset_meta_dict['__validated_state__']
+        if '__validated_state_message__' in dataset_meta_dict:
+            meta_dict['__validated_state_message__'] = dataset_meta_dict['__validated_state_message__']
         if filename is None:
             return json.dumps(meta_dict)
-        json.dump(meta_dict, open(filename, 'wt+'))
+        with open(filename, 'wt+') as fh:
+            json.dump(meta_dict, fh)
 
     def __getstate__(self):
         # cannot pickle a weakref item (self._parent), when
@@ -209,29 +223,28 @@ class MetadataCollection(object):
         return None
 
 
-class MetadataSpecCollection(odict):
+class MetadataSpecCollection(OrderedDict):
     """
-    A simple extension of dict which allows cleaner access to items
+    A simple extension of OrderedDict which allows cleaner access to items
     and allows the values to be iterated over directly as if it were a
     list.  append() is also implemented for simplicity and does not
     "append".
     """
 
-    def __init__(self, dict=None):
-        odict.__init__(self, dict=None)
+    def __init__(self, *args, **kwds):
+        super(MetadataSpecCollection, self).__init__(*args, **kwds)
 
     def append(self, item):
         self[item.name] = item
 
-    def iter(self):
-        return iter(self.values())
-
     def __getattr__(self, name):
+        if name not in self:
+            raise AttributeError
         return self.get(name)
 
     def __repr__(self):
         # force elements to draw with __str__ for sphinx-apidoc
-        return ', '.join([item.__str__() for item in self.iter()])
+        return ', '.join(item.__str__() for item in self.values())
 
 
 class MetadataParameter(object):
@@ -462,7 +475,7 @@ class ColumnTypesParameter(MetadataParameter):
 class ListParameter(MetadataParameter):
 
     def to_string(self, value):
-        return ",".join([str(x) for x in value])
+        return ",".join(str(x) for x in value)
 
 
 class DictParameter(MetadataParameter):
@@ -620,14 +633,15 @@ class MetadataTempFile(object):
     @classmethod
     def cleanup_from_JSON_dict_filename(cls, filename):
         try:
-            for key, value in json.load(open(filename)).items():
-                if cls.is_JSONified_value(value):
-                    value = cls.from_JSON(value)
-                if isinstance(value, cls) and os.path.exists(value.file_name):
-                    log.debug('Cleaning up abandoned MetadataTempFile file: %s' % value.file_name)
-                    os.unlink(value.file_name)
+            with open(filename) as fh:
+                for value in json.load(fh).values():
+                    if cls.is_JSONified_value(value):
+                        value = cls.from_JSON(value)
+                    if isinstance(value, cls) and os.path.exists(value.file_name):
+                        log.debug('Cleaning up abandoned MetadataTempFile file: %s', value.file_name)
+                        os.unlink(value.file_name)
         except Exception as e:
-            log.debug('Failed to cleanup MetadataTempFile temp files from %s: %s' % (filename, e))
+            log.debug('Failed to cleanup MetadataTempFile temp files from %s: %s', filename, unicodify(e))
 
 
 __all__ = (

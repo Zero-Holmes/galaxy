@@ -2,7 +2,6 @@
 import logging
 import os
 import re
-import subprocess
 
 from galaxy.datatypes import (
     data,
@@ -19,23 +18,28 @@ from galaxy.datatypes.sniff import (
 from galaxy.datatypes.tabular import Tabular
 from galaxy.datatypes.util.generic_util import count_special_lines
 from galaxy.datatypes.xml import GenericXml
+from galaxy.util import (
+    commands,
+    unicodify
+)
 
 log = logging.getLogger(__name__)
 
 
 def count_lines(filename, non_empty=False):
     """
-        counting the number of lines from the 'filename' file
+    counting the number of lines from the 'filename' file
     """
+    if non_empty:
+        cmd = ['grep', '-cve', r'^\s*$', filename]
+    else:
+        cmd = ['wc', '-l', filename]
     try:
-        if non_empty:
-            out = subprocess.Popen(['grep', '-cve', r'^\s*$', filename], stdout=subprocess.PIPE)
-        else:
-            out = subprocess.Popen(['wc', '-l', filename], stdout=subprocess.PIPE)
-        return int(out.communicate()[0].split()[0])
-    except Exception:
-        pass
-    return 0
+        out = commands.execute(cmd)
+    except commands.CommandLineException as e:
+        log.error(unicodify(e))
+        return 0
+    return int(out.split()[0])
 
 
 class GenericMolFile(data.Text):
@@ -167,7 +171,7 @@ class SDF(GenericMolFile):
             if sdf_lines_accumulated:
                 _write_part_sdf_file(sdf_lines_accumulated)
         except Exception as e:
-            log.error('Unable to split files: %s' % str(e))
+            log.error('Unable to split files: %s', unicodify(e))
             raise
     split = classmethod(split)
 
@@ -254,7 +258,7 @@ class MOL2(GenericMolFile):
             if mol2_lines_accumulated:
                 _write_part_mol2_file(mol2_lines_accumulated)
         except Exception as e:
-            log.error('Unable to split files: %s' % str(e))
+            log.error('Unable to split files: %s', unicodify(e))
             raise
     split = classmethod(split)
 
@@ -333,7 +337,7 @@ class FPS(GenericMolFile):
             if lines_accumulated:
                 _write_part_fingerprint_file(header_lines + lines_accumulated)
         except Exception as e:
-            log.error('Unable to split files: %s' % str(e))
+            log.error('Unable to split files: %s', unicodify(e))
             raise
     split = classmethod(split)
 
@@ -503,7 +507,7 @@ class PDB(GenericMolFile):
                             chain_ids.add(line[21])
             dataset.metadata.chain_ids = list(chain_ids)
         except Exception as e:
-            log.error('Error finding chain_ids: %s' % str(e))
+            log.error('Error finding chain_ids: %s', unicodify(e))
             raise
 
     def set_peek(self, dataset, is_multi_byte=False):
@@ -656,7 +660,7 @@ class PQR(GenericMolFile):
                         chain_ids.add(match.groups()[5])
             dataset.metadata.chain_ids = list(chain_ids)
         except Exception as e:
-            log.error('Error finding chain_ids: %s' % str(e))
+            log.error('Error finding chain_ids: %s', unicodify(e))
             raise
 
     def set_peek(self, dataset, is_multi_byte=False):
@@ -898,7 +902,7 @@ class CML(GenericXml):
             if cml_lines_accumulated:
                 _write_part_cml_file(cml_lines_accumulated)
         except Exception as e:
-            log.error('Unable to split files: %s' % str(e))
+            log.error('Unable to split files: %s', unicodify(e))
             raise
     split = classmethod(split)
 

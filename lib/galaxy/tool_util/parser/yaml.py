@@ -1,18 +1,26 @@
+from collections import OrderedDict
+
 import packaging.version
 
 from galaxy.tool_util.deps import requirements
-from galaxy.util.odict import odict
-from .interface import InputSource
-from .interface import PageSource
-from .interface import PagesSource
-from .interface import ToolSource
+from galaxy.tool_util.parser.util import (
+    DEFAULT_DELTA,
+    DEFAULT_DELTA_FRAC
+)
+from .interface import (
+    InputSource,
+    PageSource,
+    PagesSource,
+    ToolSource,
+)
 from .output_collection_def import dataset_collector_descriptions_from_output_dict
 from .output_objects import (
     ToolOutput,
     ToolOutputCollection,
     ToolOutputCollectionStructure,
 )
-from .util import error_on_exit_code, is_dict
+from .stdio import error_on_exit_code
+from .util import is_dict
 
 
 class YamlToolSource(ToolSource):
@@ -39,6 +47,10 @@ class YamlToolSource(ToolSource):
 
     def parse_edam_topics(self):
         return self.root_dict.get("edam_topics", [])
+
+    def parse_xrefs(self):
+        xrefs = self.root_dict.get("xrefs", [])
+        return [dict(value=xref["value"], reftype=xref["type"]) for xref in xrefs if xref["type"]]
 
     def parse_is_multi_byte(self):
         return self.root_dict.get("is_multi_byte", self.default_is_multi_byte)
@@ -101,10 +113,10 @@ class YamlToolSource(ToolSource):
             else:
                 message = "Unknown output_type [%s] encountered." % output_type
                 raise Exception(message)
-        outputs = odict()
+        outputs = OrderedDict()
         for output in output_defs:
             outputs[output.name] = output
-        output_collections = odict()
+        output_collections = OrderedDict()
         for output in output_collection_defs:
             output_collections[output.name] = output
 
@@ -164,6 +176,9 @@ class YamlToolSource(ToolSource):
     def parse_profile(self):
         return self.root_dict.get("profile", "16.04")
 
+    def parse_interactivetool(self):
+        return self.root_dict.get("entry_points", [])
+
     def parse_python_template_version(self):
         python_template_version = self.root_dict.get("python_template_version", None)
         if python_template_version is not None:
@@ -207,7 +222,8 @@ def _parse_test(i, test_dict):
         defaults = {
             'compare': 'diff',
             'lines_diff': 0,
-            'delta': 1000,
+            'delta': DEFAULT_DELTA,
+            'delta_frac': DEFAULT_DELTA_FRAC,
             'sort': False,
         }
         # TODO

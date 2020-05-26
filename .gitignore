@@ -9,20 +9,38 @@ scripts/scramble/archives
 .venv
 .venv3
 
+# Python build artifacts
+build
+dist
+lib/galaxy.egg-info
+.eggs
+
+# Generated static content
+lib/galaxy/web/framework/static/maps
+lib/galaxy/web/framework/static/scripts
+lib/galaxy/web/framework/static/style
+
 # Database stuff
+database/*.sqlite
 database/beaker_sessions
 database/citations
 database/community_files
 database/compiled_templates
+database/dependencies
 database/files
-database/jobs_directory
 database/job_working_directory
+database/jobs_directory
+database/mulled
+database/object_store_cache
+database/objects
+database/openid_consumer_cache
 database/pbs
+database/shed_tools
 database/test_errors
 database/tmp
-database/*.sqlite
-database/openid_consumer_cache
-database/dependencies
+database/tool_cache
+database/tool_search_index
+
 
 # Python bytecode
 *.pyc
@@ -72,6 +90,7 @@ job_metrics_conf.xml
 workflow_schedulers_conf.xml
 config/*
 config/plugins/interactive_environments/**/*.ini
+config/plugins/**/.cache
 !config/plugins
 static/welcome.html.*
 static/welcome.html
@@ -160,3 +179,9 @@ packages/*/*.egg-info
 .DS_Store
 *.rej
 *~
+
+# standalone script + main, or build into dist.
+config/plugins/visualizations/**/static/dist
+config/plugins/visualizations/**/static/script.js
+config/plugins/visualizations/**/static/main.css
+config/plugins/visualizations/**/static/plugin_build_hash.txt

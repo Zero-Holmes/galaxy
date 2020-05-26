@@ -4,6 +4,7 @@ import _l from "utils/localization";
 import _ from "underscore";
 import jQuery from "jquery";
 import { getGalaxyInstance } from "app";
+import { getAppRoot } from "onload/loadConfig";
 
 var $ = jQuery;
 
@@ -35,12 +36,12 @@ var CopyDialog = {
             '<div class="warningmessage">',
             "<%- anonWarning %>",
             _l("You can"),
-            ' <a href="/user/login">',
+            ' <a href="<%= galaxyRoot %>user/login">',
             _l("login here"),
             "</a> ",
             _l("or"),
             " ",
-            ' <a href="/user/create">',
+            ' <a href="<%= galaxyRoot %>user/create">',
             _l("register here"),
             "</a>.",
             "</div>",
@@ -71,18 +72,14 @@ var CopyDialog = {
             '<% if( copyWhat === "copy-all" ){ print( "checked" ); } %>/>',
             '<label for="copy-all"> <%- allLabel %></label>',
             "<% } %>",
-            "</form>"
+            "</form>",
         ].join("")
     ),
 
     // empty modal body and let the user know the copy is happening
     _showAjaxIndicator: function _showAjaxIndicator() {
         var indicator = `<p><span class="fa fa-spinner fa-spin"></span> ${this.progressive}...</p>`;
-        this.modal
-            .$(".modal-body")
-            .empty()
-            .append(indicator)
-            .css({ "margin-top": "8px" });
+        this.modal.$(".modal-body").empty().append(indicator).css({ "margin-top": "8px" });
     },
 
     // (sorta) public interface - display the modal, render the form, and potentially copy the history
@@ -97,7 +94,7 @@ var CopyDialog = {
             defaultCopyNameFn = options.nameFn || this.defaultName;
 
         var defaultCopyName = defaultCopyNameFn({
-            name: history.get("name")
+            name: history.get("name"),
         });
 
         var // TODO: these two might be simpler as one 3 state option (all,active,no-choice)
@@ -122,13 +119,13 @@ var CopyDialog = {
             dialog._showAjaxIndicator();
             history
                 .copy(true, name, copyAllDatasets)
-                .done(response => {
+                .done((response) => {
                     deferred.resolve(response);
                 })
-                .fail(function(xhr, status, message) {
+                .fail(function (xhr, status, message) {
                     var options = {
                         name: name,
-                        copyAllDatasets: copyAllDatasets
+                        copyAllDatasets: copyAllDatasets,
                     };
                     ERROR_MODAL.ajaxErrorModal(history, xhr, options, dialog.errorMessage);
                     deferred.rejectWith(deferred, arguments);
@@ -147,13 +144,14 @@ var CopyDialog = {
                 title: this.title({ name: history.get("name") }),
                 body: $(
                     dialog._template({
+                        galaxyRoot: getAppRoot(),
                         name: defaultCopyName,
                         isAnon: Galaxy.user.isAnonymous(),
                         allowAll: allowAll,
                         copyWhat: defaultCopyWhat,
                         activeLabel: this.activeLabel,
                         allLabel: this.allLabel,
-                        anonWarning: this.anonWarning
+                        anonWarning: this.anonWarning,
                     })
                 ),
                 buttons: _.object([
@@ -161,9 +159,9 @@ var CopyDialog = {
                         _l("Cancel"),
                         () => {
                             modal.hide();
-                        }
+                        },
                     ],
-                    [this.submitLabel, checkNameAndCopy]
+                    [this.submitLabel, checkNameAndCopy],
                 ]),
                 height: "auto",
                 closing_events: true,
@@ -174,16 +172,13 @@ var CopyDialog = {
                     if (originalClosingCallback) {
                         originalClosingCallback(cancelled);
                     }
-                }
+                },
             })
         );
 
         // set the default dataset copy, autofocus the title, and set up for a simple return
-        modal
-            .$("#copy-modal-title")
-            .focus()
-            .select();
-        modal.$("#copy-modal-title").on("keydown", ev => {
+        modal.$("#copy-modal-title").focus().select();
+        modal.$("#copy-modal-title").on("keydown", (ev) => {
             if (ev.keyCode === 13) {
                 ev.preventDefault();
                 checkNameAndCopy();
@@ -191,7 +186,7 @@ var CopyDialog = {
         });
 
         return deferred;
-    }
+    },
 };
 
 //==============================================================================
@@ -209,7 +204,7 @@ var ImportDialog = _.extend({}, CopyDialog, {
     allLabel: _l("Import all datasets including deleted ones"),
     anonWarning:
         _l("As an anonymous user, unless you login or register, you will lose your current history ") +
-        _l("after importing this history. ")
+        _l("after importing this history. "),
 });
 
 //==============================================================================

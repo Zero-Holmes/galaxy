@@ -11,7 +11,11 @@ import threading
 
 from six.moves import shlex_quote
 
-from galaxy.util import listify, sleeper
+from galaxy.util import (
+    listify,
+    sleeper,
+    unicodify,
+)
 from galaxy.util.json import jsonrpc_request, validate_jsonrpc_response
 
 log = logging.getLogger(__name__)
@@ -59,7 +63,7 @@ class TransferManager(object):
         running daemon, so it should be fairly quick to return.
         """
         transfer_jobs = listify(transfer_jobs)
-        printable_tj_ids = ', '.join([str(tj.id) for tj in transfer_jobs])
+        printable_tj_ids = ', '.join(str(tj.id) for tj in transfer_jobs)
         log.debug('Initiating transfer job(s): %s' % printable_tj_ids)
         # Set all jobs running before spawning, or else updating the state may
         # clobber a state change performed by the worker.
@@ -113,7 +117,7 @@ class TransferManager(object):
                     self.sa_session.refresh(tj)
                     error = e.args
                     if type(error) != dict:
-                        error = dict(code=256, message='Error connecting to transfer daemon', data=str(e))
+                        error = dict(code=256, message='Error connecting to transfer daemon', data=unicodify(e))
                     rval.append(dict(transfer_job_id=tj.id, state=tj.state, error=error))
             else:
                 self.sa_session.refresh(tj)
